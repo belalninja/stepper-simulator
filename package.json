@@ -9,6 +9,7 @@
 		"build": "vite build && tsx scripts/split-build.ts && tsc -b && nitro build",
 		"lint": "eslint .",
 		"preview": "node .output/server/index.mjs",
+		"deploy:pages": "bash scripts/deploy-pages.sh",
 		"data:update-stepper-db": "tsx data/csv-converter.ts",
 		"data:dump-stepper-db-table": "tsx data/generate-table.ts"
 	},
