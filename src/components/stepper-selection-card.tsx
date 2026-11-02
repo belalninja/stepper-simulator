@@ -152,7 +152,7 @@ export function StepperSelectionCard() {
 				</Button>
 			</DialogTrigger>
 			<DialogContent
-				className="sm:max-w-[1280px] max-h-[960px] min-h-[1px] h-full gap-4 flex flex-col"
+				className="sm:max-w-[1280px] max-h-[960px] min-h-[1px] h-[calc(100dvh-2rem)] gap-4 flex flex-col max-sm:p-4"
 				showCloseButton={false}
 			>
 				<DialogClose className="bg-white/20 cursor-pointer rounded border border-border ring-offset-background focus:ring-ring data-[state=open]:bg-accent data-[state=open]:text-muted-foreground absolute top-4 right-4 opacity-70 transition-opacity hover:opacity-100 focus:ring-2 focus:ring-offset-2 focus:outline-hidden disabled:pointer-events-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5">
@@ -160,10 +160,15 @@ export function StepperSelectionCard() {
 					<span className="sr-only">Close</span>
 				</DialogClose>
 
-				<DialogTitle>List of all stepper motors</DialogTitle>
+				<DialogTitle className="pr-10">List of all stepper motors</DialogTitle>
 
-				<div className="flex gap-4">
-					<Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." />
+				<div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+					<Input
+						className="min-w-0 flex-1 basis-48"
+						value={search}
+						onChange={(e) => setSearch(e.target.value)}
+						placeholder="Search..."
+					/>
 
 					<div className="flex flex-row gap-2 items-center justify-between">
 						<span>Exact</span>

@@ -216,7 +216,7 @@ export function CustomStepperModal() {
 					Custom
 				</Button>
 			</DialogTrigger>
-			<DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+			<DialogContent className="max-w-[calc(100%-2rem)] sm:max-w-4xl max-h-[calc(100dvh-2rem)] overflow-y-auto max-sm:p-4">
 				<DialogHeader>
 					<DialogTitle>Custom Steppers</DialogTitle>
 				</DialogHeader>

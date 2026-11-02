@@ -32,19 +32,22 @@ export function App() {
 	}, [loadImportedConfig, setUnresolvedSteppers]);
 
 	return (
+		// Phones get one column in the order people use it: pick motors, read the graph, tune the
+		// settings, then the per-motor details. `max-md:contents` lets the main column's children
+		// take part in that order; desktop keeps the two-column layout.
 		<div className="flex max-md:flex-col gap-2 p-2 max-w-7xl mx-auto">
-			<div className="md:hidden flex flex-col gap-2">
+			<div className="md:hidden flex flex-col gap-2 max-md:order-1">
 				<ImportWarning />
 				<StepperSelection />
 			</div>
-			<div className="md:hidden flex flex-row md:flex-col gap-2 w-full md:w-1/3">
+			<div className="md:hidden flex flex-col gap-2 w-full max-md:order-3">
 				<DriveSettings />
 				<GantrySettings />
 			</div>
 
-			<div className="flex flex-col gap-2 w-full md:w-2/3">
-				<Card>
-					<CardHeader className="flex justify-between items-center gap-2">
+			<div className="max-md:contents md:flex md:flex-col gap-2 w-full md:w-2/3">
+				<Card className="max-md:order-4">
+					<CardHeader className="flex flex-wrap justify-between items-center gap-2">
 						<CardTitle>Steppers</CardTitle>
 						<ShareConfigButton />
 					</CardHeader>
@@ -58,7 +61,9 @@ export function App() {
 						))}
 					</CardContent>
 				</Card>
-				<Graph />
+				<div className="max-md:order-2 min-w-0">
+					<Graph />
+				</div>
 			</div>
 			<div className="hidden md:flex flex-row md:flex-col gap-2 w-full md:w-1/3">
 				<ImportWarning />
@@ -70,7 +75,7 @@ export function App() {
 				<AttributionCard className="max-md:hidden" />
 			</div>
 
-			<AttributionCard className="block md:hidden" />
+			<AttributionCard className="block md:hidden max-md:order-5" />
 		</div>
 	);
 }

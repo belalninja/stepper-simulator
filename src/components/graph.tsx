@@ -186,11 +186,11 @@ export function Graph() {
 
 	return (
 		<Card className="pt-0">
-			<CardHeader className="flex items-center gap-2 space-y-0 border-b py-5 sm:flex-row">
+			<CardHeader className="flex flex-wrap items-center gap-2 space-y-0 border-b py-5 sm:flex-row">
 				<div className="grid flex-1 gap-1">
 					<CardTitle>Torque Graph</CardTitle>
 				</div>
-				<div className="flex items-center gap-2">
+				<div className="flex flex-wrap items-center gap-2">
 					{zoomed && (
 						<Button variant="outline" size="sm" onClick={reset}>
 							Reset view
@@ -228,9 +228,11 @@ export function Graph() {
 					<div className="flex flex-col gap-2">
 						<div
 							{...handlers}
-							className={`touch-none select-none ${panning ? 'cursor-grabbing' : 'cursor-grab'}`}
+							// Until zoomed, a one-finger swipe scrolls the page (an unzoomed chart has nothing to
+							// pan) while a pinch still reaches the chart; once zoomed, one finger pans it
+							className={`${zoomed ? 'touch-none' : 'touch-pan-y'} select-none ${panning ? 'cursor-grabbing' : 'cursor-grab'}`}
 						>
-							<ChartContainer config={chartConfig} className="aspect-auto h-100 w-full">
+							<ChartContainer config={chartConfig} className="aspect-auto h-80 sm:h-100 w-full">
 								<ComposedChart data={plotData}>
 									<CartesianGrid vertical={false} />
 									<XAxis
@@ -465,7 +467,18 @@ export function Graph() {
 							</p>
 						)}
 
-						<p className="text-center text-xs text-muted-foreground flex items-center justify-center gap-3">
+						{/* Touch screens: pinch and drag. Mouse: wheel with modifier keys */}
+						<p className="pointer-fine:hidden text-center text-xs text-muted-foreground flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
+							<span className="flex items-center gap-1">
+								<SearchIcon className="h-4 w-4" />
+								Pinch to zoom
+							</span>
+							<span className="flex items-center gap-1">
+								<GrabIcon className="h-4 w-4" />
+								Drag to pan once zoomed
+							</span>
+						</p>
+						<p className="pointer-coarse:hidden text-center text-xs text-muted-foreground flex flex-wrap items-center justify-center gap-x-3 gap-y-1">
 							<span className="flex items-center gap-1">
 								<GrabIcon className="h-4 w-4" />
 								Drag to pan
