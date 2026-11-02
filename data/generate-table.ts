@@ -7,7 +7,7 @@ const headers = [
 	'NEMA',
 	'Body Length mm',
 	'Step Angle (deg)',
-	'Rated Current (A, peak)',
+	'Rated Current (A, rated)',
 	'Torque (N-cm)',
 	'Inductance (mH)',
 	'Resistance (Ohms)',

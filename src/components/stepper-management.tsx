@@ -8,6 +8,14 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { track } from '@/lib/analytics';
+import {
+	INERTIA_UNITS,
+	type InertiaUnit,
+	inertiaToGcm2,
+	TORQUE_UNITS,
+	type TorqueUnit,
+	torqueToNcm
+} from '@/lib/datasheet-units';
 import type {
 	Ampere,
 	Degree,
@@ -19,8 +27,8 @@ import type {
 	StepperDefinition
 } from '@/lib/stepper';
 import { NEMASize } from '@/lib/stepper';
-import { currentCustomSteppersAtom, currentDebugAtom } from '@/state/atoms';
-import { useAtom, useAtomValue } from 'jotai';
+import { currentCustomSteppersAtom, currentDebugAtom, isImportedConfigAtom, steppersAtom } from '@/state/atoms';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { SaveIcon, SettingsIcon, ShareIcon, TrashIcon } from 'lucide-react';
 import { useState } from 'react';
 
@@ -112,8 +120,12 @@ export function ContributeSteppersButton() {
 	);
 }
 
+const isSameStepper = (a: StepperDefinition, b: StepperDefinition) => a.brand === b.brand && a.model === b.model;
+
 export function CustomStepperModal() {
 	const [customSteppers, setCustomSteppers] = useAtom(currentCustomSteppersAtom);
+	const setSelectedSteppers = useSetAtom(steppersAtom);
+	const isImported = useAtomValue(isImportedConfigAtom);
 	const [open, setOpen] = useState(false);
 	const [formData, setFormData] = useState({
 		brand: '',
@@ -127,6 +139,11 @@ export function CustomStepperModal() {
 		resistance: 1.5,
 		rotorInertia: 68
 	});
+
+	const [torqueUnit, setTorqueUnit] = useState<TorqueUnit>('Ncm');
+	const [inertiaUnit, setInertiaUnit] = useState<InertiaUnit>('gcm2');
+	const torqueNcm = torqueToNcm(formData.torque, torqueUnit);
+	const rotorInertiaGcm2 = inertiaToGcm2(formData.rotorInertia, inertiaUnit);
 
 	const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -159,14 +176,19 @@ export function CustomStepperModal() {
 			bodyLength: formData.bodyLength as Millimeter,
 			stepAngle: formData.stepAngle as Degree,
 			ratedCurrent: formData.ratedCurrent as Ampere,
-			torque: formData.torque as NewtonCentimeter,
+			torque: torqueNcm as NewtonCentimeter,
 			inductance: formData.inductance as MilliHenry,
 			resistance: formData.resistance as Ohm,
-			rotorInertia: formData.rotorInertia as GramSquareCentimeter,
+			rotorInertia: rotorInertiaGcm2 as GramSquareCentimeter,
 			comments: []
 		};
 
-		setCustomSteppers((previous: StepperDefinition[]) => [...previous, customStepper]);
+		// Saving a brand + model that already exists replaces it, including where it is selected
+		setCustomSteppers((previous: StepperDefinition[]) => [
+			...previous.filter((s) => !isSameStepper(s, customStepper)),
+			customStepper
+		]);
+		setSelectedSteppers((previous) => previous.map((s) => (isSameStepper(s, customStepper) ? customStepper : s)));
 		track('Custom Stepper Created');
 
 		// Reset form and close modal
@@ -199,6 +221,12 @@ export function CustomStepperModal() {
 					<DialogTitle>Custom Steppers</DialogTitle>
 				</DialogHeader>
 
+				<p className="text-xs text-muted-foreground">
+					{isImported
+						? 'You are viewing a shared configuration: changes here are kept only if you save it.'
+						: 'Custom steppers are saved in this browser and stay after a reload. Deleting one removes it for good.'}
+				</p>
+
 				<div className="space-y-2">
 					{/* Custom Steppers */}
 					{customSteppers.map((stepper) => (
@@ -215,10 +243,10 @@ export function CustomStepperModal() {
 								onClick={(e) => {
 									e.preventDefault();
 									setCustomSteppers((previous: StepperDefinition[]) =>
-										previous.filter(
-											(s: StepperDefinition) =>
-												s.brand !== stepper.brand && s.model !== stepper.model
-										)
+										previous.filter((s) => !isSameStepper(s, stepper))
+									);
+									setSelectedSteppers((previous) =>
+										previous.filter((s) => !isSameStepper(s, stepper))
 									);
 								}}
 							>
@@ -307,7 +335,7 @@ export function CustomStepperModal() {
 						</div>
 
 						<div className="space-y-2">
-							<Label htmlFor="ratedCurrent">Rated Current (A, peak per phase)</Label>
+							<Label htmlFor="ratedCurrent">Rated Current (A/phase)</Label>
 							<NumberInput
 								id="ratedCurrent"
 								step="0.01"
@@ -316,20 +344,52 @@ export function CustomStepperModal() {
 								onValueChange={(v) => setFormData({ ...formData, ratedCurrent: v as number })}
 								className={errors.ratedCurrent ? 'border-red-500' : ''}
 							/>
-							{errors.ratedCurrent && <span className="text-sm text-red-500">{errors.ratedCurrent}</span>}
+							{errors.ratedCurrent ? (
+								<span className="text-sm text-red-500">{errors.ratedCurrent}</span>
+							) : (
+								<span className="block text-xs text-muted-foreground">
+									Type the datasheet value as printed ("Rated current", "Current/phase", "A/phase"),
+									even if it says RMS. No conversion needed.
+									{formData.ratedCurrent > 0 &&
+										` Full holding torque at ${formData.ratedCurrent} A RMS run_current (${(formData.ratedCurrent * Math.SQRT2).toFixed(2)} A peak).`}
+								</span>
+							)}
 						</div>
 
 						<div className="space-y-2">
-							<Label htmlFor="torque">Torque (Ncm)</Label>
-							<NumberInput
-								id="torque"
-								step="0.1"
-								min="0"
-								value={formData.torque}
-								onValueChange={(v) => setFormData({ ...formData, torque: v as number })}
-								className={errors.torque ? 'border-red-500' : ''}
-							/>
-							{errors.torque && <span className="text-sm text-red-500">{errors.torque}</span>}
+							<Label htmlFor="torque">Holding Torque</Label>
+							<div className="flex gap-2">
+								<NumberInput
+									id="torque"
+									step="0.001"
+									min="0"
+									value={formData.torque}
+									onValueChange={(v) => setFormData({ ...formData, torque: v as number })}
+									className={errors.torque ? 'border-red-500' : ''}
+								/>
+								<Select value={torqueUnit} onValueChange={(v) => setTorqueUnit(v as TorqueUnit)}>
+									<SelectTrigger className="w-40 shrink-0" aria-label="Torque unit">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{Object.entries(TORQUE_UNITS).map(([key, unit]) => (
+											<SelectItem key={key} value={key}>
+												{unit.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+							{errors.torque ? (
+								<span className="text-sm text-red-500">{errors.torque}</span>
+							) : (
+								torqueUnit !== 'Ncm' &&
+								formData.torque > 0 && (
+									<span className="block text-xs text-muted-foreground">
+										= {torqueNcm.toFixed(2)} N·cm
+									</span>
+								)
+							)}
 						</div>
 
 						<div className="space-y-2">
@@ -359,17 +419,46 @@ export function CustomStepperModal() {
 						</div>
 
 						<div className="space-y-2">
-							<Label htmlFor="rotorInertia">Rotor Inertia (gcm²)</Label>
-							<NumberInput
-								id="rotorInertia"
-								step="0.1"
-								min="0"
-								value={formData.rotorInertia}
-								onValueChange={(v) => setFormData({ ...formData, rotorInertia: v as number })}
-								className={errors.rotorInertia ? 'border-red-500' : ''}
-							/>
-							{errors.rotorInertia && <span className="text-sm text-red-500">{errors.rotorInertia}</span>}
+							<Label htmlFor="rotorInertia">Rotor Inertia</Label>
+							<div className="flex gap-2">
+								<NumberInput
+									id="rotorInertia"
+									step="0.001"
+									min="0"
+									value={formData.rotorInertia}
+									onValueChange={(v) => setFormData({ ...formData, rotorInertia: v as number })}
+									className={errors.rotorInertia ? 'border-red-500' : ''}
+								/>
+								<Select value={inertiaUnit} onValueChange={(v) => setInertiaUnit(v as InertiaUnit)}>
+									<SelectTrigger className="w-40 shrink-0" aria-label="Inertia unit">
+										<SelectValue />
+									</SelectTrigger>
+									<SelectContent>
+										{Object.entries(INERTIA_UNITS).map(([key, unit]) => (
+											<SelectItem key={key} value={key}>
+												{unit.label}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+							</div>
+							{errors.rotorInertia ? (
+								<span className="text-sm text-red-500">{errors.rotorInertia}</span>
+							) : (
+								inertiaUnit !== 'gcm2' &&
+								formData.rotorInertia > 0 && (
+									<span className="block text-xs text-muted-foreground">
+										= {rotorInertiaGcm2.toFixed(1)} g·cm²
+									</span>
+								)
+							)}
 						</div>
+
+						<p className="text-xs text-muted-foreground md:col-span-2">
+							Use the bipolar values for the wiring you will run. For 8-wire motors, series and parallel
+							wiring have different current, resistance and inductance; unipolar ratings do not apply to
+							bipolar drivers.
+						</p>
 					</div>
 
 					<div className="flex justify-end gap-2 pt-4">

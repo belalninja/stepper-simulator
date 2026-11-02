@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "scientific-critical-thinking": {
+      "source": "k-dense-ai/scientific-agent-skills",
+      "sourceType": "github",
+      "skillPath": "skills/scientific-critical-thinking/SKILL.md",
+      "computedHash": "5f432576778e12aa04e722fa56c7c801cd644beed162d1c516b43721e5469d69"
+    }
+  }
+}

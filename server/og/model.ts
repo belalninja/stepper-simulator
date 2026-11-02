@@ -1,5 +1,5 @@
 import { decodeConfig } from '@/lib/config-sharing';
-import { calculateMaxPower, calculateRequiredTorque } from '@/lib/formulas';
+import { calculateRequiredTorque } from '@/lib/formulas';
 import {
 	autoMaxVelocity,
 	buildTorqueCurve,
@@ -125,8 +125,7 @@ export function buildOgModel(configParam: string | null | undefined): OgModel {
 	const curveInput = {
 		steppers,
 		driveSettings,
-		gantrySettings,
-		maxPower: calculateMaxPower(driveSettings)
+		gantrySettings
 	};
 	const maxVelocity = autoMaxVelocity({ ...curveInput, requiredTorque: requiredTorque ?? 0 });
 
@@ -156,7 +155,9 @@ export function buildOgModel(configParam: string | null | undefined): OgModel {
 		`${formatNumber(driveSettings.maxDriveCurrent, 2)} A`,
 		`${formatNumber(gantrySettings.pulleyTeeth, 0)}T pulley`,
 		`${formatNumber(gantrySettings.acceleration, 0)} mm/s²`,
-		`${formatNumber(gantrySettings.toolheadAndYAxisMass, 0)} g`
+		gantrySettings.kinematicsMode === 'corexy'
+			? `${formatNumber(gantrySettings.toolheadMass, 0)}g + ${formatNumber(gantrySettings.gantryBeamMass, 0)}g CoreXY`
+			: `${formatNumber(gantrySettings.toolheadAndYAxisMass, 0)} g`
 	].join(' · ');
 
 	const base = {

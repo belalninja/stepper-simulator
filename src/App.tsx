@@ -50,7 +50,11 @@ export function App() {
 					</CardHeader>
 					<CardContent className="flex flex-wrap gap-2">
 						{steppers.map((stepper: StepperDefinition) => (
-							<StepperSpecsCard showRemoveButton key={stepper.model} stepper={stepper} />
+							<StepperSpecsCard
+								showRemoveButton
+								key={`${stepper.brand}|${stepper.model}`}
+								stepper={stepper}
+							/>
 						))}
 					</CardContent>
 				</Card>

@@ -2,8 +2,13 @@ import type { Ampere } from '@/lib/stepper';
 import z from 'zod/v4';
 
 /**
- * Internally every current value is the per-phase peak amplitude, as the datasheets specify them.
- * Firmware (TMC `run_current` in Klipper, etc.) uses RMS so the UI can convert at the boundary.
+ * Two current conventions live in the app:
+ * - Drive current (`DriveSettings.maxDriveCurrent`) is stored as the per-phase sine **peak**
+ *   amplitude. Firmware (TMC `run_current` in Klipper, etc.) uses RMS, so the UI converts at the
+ *   boundary with the helpers below.
+ * - Motor rated current (`StepperDefinition.ratedCurrent`) is the datasheet "rated current per
+ *   phase", entered as printed. It is the DC current both phases carry in the holding-torque test,
+ *   which is thermally equivalent to the same value in RMS. Its sine peak is `ratedCurrent * √2`.
  */
 export const CurrentUnit = z.enum(['peak', 'rms']);
 export type CurrentUnit = z.infer<typeof CurrentUnit>;

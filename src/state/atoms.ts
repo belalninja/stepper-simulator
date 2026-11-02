@@ -8,10 +8,10 @@ import {
 	GantrySettingsSchema,
 	type ShareableConfiguration
 } from '@/lib/configuration';
-import { calculateMaxPower } from '@/lib/formulas';
-import type { StepperDefinition, Watts } from '@/lib/stepper';
+import { StepperDefinition } from '@/lib/stepper';
+import { STEPPER_DB } from '@/lib/stepper-db';
 import { atom } from 'jotai';
-import type z from 'zod/v4';
+import z from 'zod/v4';
 
 type SetStateAction<T> = T | ((prev: T) => T);
 
@@ -33,10 +33,15 @@ export const unresolvedImportedSteppersAtom = atom<string[]>([]);
 
 function atomWithLocalStorage<T>(key: string, initialValue: T, schema?: z.ZodType<T>) {
 	const getInitialValue = () => {
-		const item = localStorage.getItem(key);
-		if (item === null) return initialValue;
-
-		const parsed: unknown = JSON.parse(item);
+		let parsed: unknown;
+		try {
+			const item = localStorage.getItem(key);
+			if (item === null) return initialValue;
+			parsed = JSON.parse(item);
+		} catch {
+			// Blocked storage or a corrupt entry: start from the default instead of crashing
+			return initialValue;
+		}
 		if (schema) {
 			const result = schema.safeParse(parsed);
 			return result.success ? result.data : initialValue;
@@ -52,7 +57,11 @@ function atomWithLocalStorage<T>(key: string, initialValue: T, schema?: z.ZodTyp
 		(get, set, update) => {
 			const nextValue = typeof update === 'function' ? update(get(baseAtom)) : update;
 			set(baseAtom, nextValue);
-			localStorage.setItem(key, JSON.stringify(nextValue));
+			try {
+				localStorage.setItem(key, JSON.stringify(nextValue));
+			} catch {
+				// Storage full or blocked: the value still lives for this session
+			}
 		}
 	);
 	return derivedAtom;
@@ -79,7 +88,21 @@ const gantrySettingsAtom = atomWithLocalStorage<GantrySettings>(
 	DEFAULT_GANTRY_SETTINGS,
 	GantrySettingsSchema
 );
-const rawCustomSteppersAtom = atomWithLocalStorage<StepperDefinition[]>('customSteppers', []);
+/**
+ * Loads saved custom steppers one entry at a time, so a single malformed entry (for example from an
+ * older version) is dropped instead of wiping the whole list
+ */
+const SavedCustomSteppers = z.array(z.unknown()).transform((items) =>
+	items.flatMap((item) => {
+		const result = StepperDefinition.safeParse({ comments: [], ...(item as object) });
+		return result.success ? [result.data] : [];
+	})
+);
+const rawCustomSteppersAtom = atomWithLocalStorage<StepperDefinition[]>(
+	'customSteppers',
+	[],
+	SavedCustomSteppers as unknown as z.ZodType<StepperDefinition[]>
+);
 const customSteppersAtom = atom(
 	(get) => {
 		const steppers = get(rawCustomSteppersAtom);
@@ -181,9 +204,36 @@ export const currentDebugAtom = atom(
 	}
 );
 
-export const maxPowerAtom = atom<Watts>((get) => calculateMaxPower(get(currentDriveSettingsAtom)));
+const stepperId = (stepper: Pick<StepperDefinition, 'brand' | 'model'>) => `${stepper.brand}|${stepper.model}`;
 
-export const steppersAtom = atom<StepperDefinition[]>([]);
+/** Ids (`brand|model`) of the selected steppers, so the selection survives a reload */
+const savedSelectionAtom = atomWithLocalStorage<string[]>('selectedSteppers', [], z.array(z.string()));
+
+function resolveSelection(ids: string[], customSteppers: StepperDefinition[]): StepperDefinition[] {
+	const byId = new Map<string, StepperDefinition>();
+	for (const models of STEPPER_DB.values())
+		for (const stepper of models.values()) byId.set(stepperId(stepper), stepper);
+	// Custom steppers win over database entries with the same name, as in the selection list
+	for (const stepper of customSteppers) byId.set(stepperId(stepper), stepper);
+	return ids.flatMap((id) => byId.get(id) ?? []);
+}
+
+/** `null` until the selection changes this session; until then it is restored from storage */
+const sessionSelectionAtom = atom<StepperDefinition[] | null>(null);
+
+export const steppersAtom = atom(
+	(get) => get(sessionSelectionAtom) ?? resolveSelection(get(savedSelectionAtom), get(customSteppersAtom)),
+	(get, set, update: SetStateAction<StepperDefinition[]>) => {
+		const prev = get(steppersAtom);
+		const next =
+			typeof update === 'function'
+				? (update as (prev: StepperDefinition[]) => StepperDefinition[])(prev)
+				: update;
+		set(sessionSelectionAtom, next);
+		// An imported (shared-link) selection is only kept once the user saves that configuration
+		if (!get(isImportedConfigAtom)) set(savedSelectionAtom, next.map(stepperId));
+	}
+);
 
 export const getCurrentConfigurationAtom = atom<ShareableConfiguration>((get) => ({
 	driveSettings: get(currentDriveSettingsAtom),
@@ -198,7 +248,7 @@ export const loadImportedConfigurationAtom = atom(null, (_get, set, config: Shar
 	set(tempGantrySettingsAtom, config.gantrySettings);
 	set(tempCustomSteppersAtom, config.customSteppers);
 	set(tempDebugAtom, config.debug);
-	set(steppersAtom, config.selectedSteppers);
+	set(sessionSelectionAtom, config.selectedSteppers);
 
 	set(isImportedConfigAtom, true);
 	set(showImportWarningAtom, true);
@@ -214,6 +264,7 @@ export const saveImportedConfigurationAtom = atom(null, (get, set) => {
 	if (gantrySettings) set(gantrySettingsAtom, gantrySettings);
 	if (customSteppers) set(customSteppersAtom, customSteppers);
 	if (debug !== null) set(debugAtom, debug);
+	set(savedSelectionAtom, get(steppersAtom).map(stepperId));
 
 	set(tempDriveSettingsAtom, null);
 	set(tempGantrySettingsAtom, null);

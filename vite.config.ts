@@ -10,6 +10,9 @@ export default defineConfig({
 	// Nitro serves this directory as-is; `index.html` is moved out of it after the build so the
 	// server can inject per-link OpenGraph tags into it (see scripts/split-build.ts)
 	build: { outDir: 'dist/public', emptyOutDir: true },
+	// Saved settings and custom steppers live in localStorage, which is per origin. A fixed port keeps
+	// the origin stable between dev sessions instead of silently moving to 5174 when 5173 is busy
+	server: { port: 5173, strictPort: true },
 	resolve: {
 		alias: {
 			'@': path.resolve(__dirname, './src')

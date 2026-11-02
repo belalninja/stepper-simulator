@@ -1,5 +1,6 @@
 import type { MotorModel } from '@/lib/formulas';
 import type { CurrentUnit } from '@/lib/current-unit';
+import type { KinematicsMode } from '@/lib/configuration';
 
 type PropValue = string | number | boolean;
 
@@ -12,6 +13,7 @@ export type AnalyticsEvents = {
 	'Shared Config Saved': undefined;
 	'Motor Model Changed': { model: MotorModel };
 	'Current Unit Changed': { unit: CurrentUnit };
+	'Kinematics Mode Changed': { mode: KinematicsMode };
 	'View Mode Changed': { mode: 'table' | 'cards' };
 	'Contribute Clicked': { steppers: number };
 };

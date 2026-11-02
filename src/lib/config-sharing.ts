@@ -1,10 +1,12 @@
 import { ARCHIVED_STEPPER_DB, STEPPER_ALIASES, STEPPER_DB } from '@/lib/stepper-db';
 import {
+	CoreXYDirectionMode,
 	DEFAULT_DEBUG,
 	DEFAULT_DRIVE_SETTINGS,
 	DEFAULT_GANTRY_SETTINGS,
 	type DriveSettings,
 	type GantrySettings,
+	KinematicsMode,
 	MotorModel,
 	type ShareableConfiguration
 } from '@/lib/configuration';
@@ -37,16 +39,25 @@ const LegacyShareableConfigurationSchema = z.object({
 		inputVoltage: Volts,
 		maxDriveCurrent: Ampere,
 		currentUnit: CurrentUnit.default('peak'),
-		motorModel: MotorModel.default('classic')
+		motorModel: MotorModel.default('classic'),
+		torqueDerating: z.number().positive().default(1),
+		showModelBand: z.boolean().default(true)
 	}),
 	gantrySettings: z.object({
+		kinematicsMode: KinematicsMode.default('cartesian'),
 		pulleyTeeth: z.number(),
 		toothPitch: z.number().default(2),
 		gearA: z.number(),
 		gearB: z.number(),
 		acceleration: MillimetersPerSecondSquared,
 		toolheadAndYAxisMass: Grams.nullish().transform((v) => v ?? (500 as Grams)),
-		manualRequiredTorque: NewtonCentimeter.nullable().default(null)
+		toolheadMass: Grams.default(350 as Grams),
+		gantryBeamMass: Grams.default(800 as Grams),
+		corexyDirectionMode: CoreXYDirectionMode.default('envelope'),
+		customAngleDeg: Degree.default(45 as Degree),
+		frictionForceN: z.number().default(0),
+		manualRequiredTorque: NewtonCentimeter.nullable().default(null),
+		safetyFactor: z.number().min(1).default(1.5)
 	}),
 	customSteppers: z.array(StepperDefinition),
 	debug: z.boolean(),
@@ -84,17 +95,26 @@ const SharedConfigSchema = z.object({
 			c: Ampere.optional(), // maxDriveCurrent (always peak)
 			cu: CurrentUnit.optional(), // currentUnit
 			// p (maxDrivePercent) was removed.
-			m: MotorModel.optional() // motorModel
+			m: MotorModel.optional(), // motorModel
+			k: z.number().positive().optional(), // torqueDerating
+			bd: z.boolean().optional() // showModelBand
 		})
 		.optional(),
 	g: z
 		.object({
+			km: KinematicsMode.optional(),
 			pt: z.number().optional(), // pulleyTeeth
 			tp: z.number().optional(), // toothPitch
 			ga: z.number().optional(), // gearA
 			gb: z.number().optional(), // gearB
 			a: MillimetersPerSecondSquared.optional(), // acceleration
 			m: Grams.optional(), // toolheadAndYAxisMass
+			mh: Grams.optional(), // toolheadMass
+			mb: Grams.optional(), // gantryBeamMass
+			dm: CoreXYDirectionMode.optional(), // corexyDirectionMode
+			ca: Degree.optional(), // customAngleDeg
+			fc: z.number().optional(), // frictionForceN
+			sf: z.number().min(1).optional(), // safetyFactor
 			t: NewtonCentimeter.optional() // manualRequiredTorque
 		})
 		.optional(),
@@ -201,6 +221,8 @@ function packDriveSettings(settings: DriveSettings): SharedConfig['d'] {
 	if (settings.maxDriveCurrent !== DEFAULT_DRIVE_SETTINGS.maxDriveCurrent) packed.c = settings.maxDriveCurrent;
 	if (settings.currentUnit !== DEFAULT_DRIVE_SETTINGS.currentUnit) packed.cu = settings.currentUnit;
 	if (settings.motorModel !== DEFAULT_DRIVE_SETTINGS.motorModel) packed.m = settings.motorModel;
+	if (settings.torqueDerating !== DEFAULT_DRIVE_SETTINGS.torqueDerating) packed.k = settings.torqueDerating;
+	if (settings.showModelBand !== DEFAULT_DRIVE_SETTINGS.showModelBand) packed.bd = settings.showModelBand;
 
 	return Object.keys(packed).length > 0 ? packed : undefined;
 }
@@ -210,13 +232,16 @@ function unpackDriveSettings(packed: SharedConfig['d']): DriveSettings {
 		inputVoltage: packed?.v ?? DEFAULT_DRIVE_SETTINGS.inputVoltage,
 		maxDriveCurrent: packed?.c ?? DEFAULT_DRIVE_SETTINGS.maxDriveCurrent,
 		currentUnit: packed?.cu ?? DEFAULT_DRIVE_SETTINGS.currentUnit,
-		motorModel: packed?.m ?? DEFAULT_DRIVE_SETTINGS.motorModel
+		motorModel: packed?.m ?? DEFAULT_DRIVE_SETTINGS.motorModel,
+		torqueDerating: packed?.k ?? DEFAULT_DRIVE_SETTINGS.torqueDerating,
+		showModelBand: packed?.bd ?? DEFAULT_DRIVE_SETTINGS.showModelBand
 	};
 }
 
 function packGantrySettings(settings: GantrySettings): SharedConfig['g'] {
 	const packed: NonNullable<SharedConfig['g']> = {};
 
+	if (settings.kinematicsMode !== DEFAULT_GANTRY_SETTINGS.kinematicsMode) packed.km = settings.kinematicsMode;
 	if (settings.pulleyTeeth !== DEFAULT_GANTRY_SETTINGS.pulleyTeeth) packed.pt = settings.pulleyTeeth;
 	if (settings.toothPitch !== DEFAULT_GANTRY_SETTINGS.toothPitch) packed.tp = settings.toothPitch;
 	if (settings.gearA !== DEFAULT_GANTRY_SETTINGS.gearA) packed.ga = settings.gearA;
@@ -224,6 +249,13 @@ function packGantrySettings(settings: GantrySettings): SharedConfig['g'] {
 	if (settings.acceleration !== DEFAULT_GANTRY_SETTINGS.acceleration) packed.a = settings.acceleration;
 	if (settings.toolheadAndYAxisMass !== DEFAULT_GANTRY_SETTINGS.toolheadAndYAxisMass)
 		packed.m = settings.toolheadAndYAxisMass;
+	if (settings.toolheadMass !== DEFAULT_GANTRY_SETTINGS.toolheadMass) packed.mh = settings.toolheadMass;
+	if (settings.gantryBeamMass !== DEFAULT_GANTRY_SETTINGS.gantryBeamMass) packed.mb = settings.gantryBeamMass;
+	if (settings.corexyDirectionMode !== DEFAULT_GANTRY_SETTINGS.corexyDirectionMode)
+		packed.dm = settings.corexyDirectionMode;
+	if (settings.customAngleDeg !== DEFAULT_GANTRY_SETTINGS.customAngleDeg) packed.ca = settings.customAngleDeg;
+	if (settings.frictionForceN !== DEFAULT_GANTRY_SETTINGS.frictionForceN) packed.fc = settings.frictionForceN;
+	if (settings.safetyFactor !== DEFAULT_GANTRY_SETTINGS.safetyFactor) packed.sf = settings.safetyFactor;
 	if (settings.manualRequiredTorque !== null) packed.t = settings.manualRequiredTorque;
 
 	return Object.keys(packed).length > 0 ? packed : undefined;
@@ -231,12 +263,19 @@ function packGantrySettings(settings: GantrySettings): SharedConfig['g'] {
 
 function unpackGantrySettings(packed: SharedConfig['g']): GantrySettings {
 	return {
+		kinematicsMode: packed?.km ?? DEFAULT_GANTRY_SETTINGS.kinematicsMode,
 		pulleyTeeth: packed?.pt ?? DEFAULT_GANTRY_SETTINGS.pulleyTeeth,
 		toothPitch: packed?.tp ?? DEFAULT_GANTRY_SETTINGS.toothPitch,
 		gearA: packed?.ga ?? DEFAULT_GANTRY_SETTINGS.gearA,
 		gearB: packed?.gb ?? DEFAULT_GANTRY_SETTINGS.gearB,
 		acceleration: packed?.a ?? DEFAULT_GANTRY_SETTINGS.acceleration,
 		toolheadAndYAxisMass: packed?.m ?? DEFAULT_GANTRY_SETTINGS.toolheadAndYAxisMass,
+		toolheadMass: packed?.mh ?? DEFAULT_GANTRY_SETTINGS.toolheadMass,
+		gantryBeamMass: packed?.mb ?? DEFAULT_GANTRY_SETTINGS.gantryBeamMass,
+		corexyDirectionMode: packed?.dm ?? DEFAULT_GANTRY_SETTINGS.corexyDirectionMode,
+		customAngleDeg: packed?.ca ?? DEFAULT_GANTRY_SETTINGS.customAngleDeg,
+		frictionForceN: packed?.fc ?? DEFAULT_GANTRY_SETTINGS.frictionForceN,
+		safetyFactor: packed?.sf ?? DEFAULT_GANTRY_SETTINGS.safetyFactor,
 		manualRequiredTorque: packed?.t ?? null
 	};
 }

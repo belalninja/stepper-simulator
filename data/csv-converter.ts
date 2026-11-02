@@ -37,13 +37,13 @@ const stepperDbPath = path.join(import.meta.dirname, '..', 'src', 'lib', 'steppe
 
 const stepperId = (stepper: { brand: string; model: string }) => `${stepper.brand}|${stepper.model}`;
 
-const toPeakCurrent = (cell: string, value: number | undefined) => {
-	if (value === undefined) return value;
-
-	if (/\brms\b/i.test(cell)) return Math.round(value * Math.SQRT2 * 1000) / 1000;
-
-	return value;
-};
+/**
+ * Datasheet "rated current per phase" is stored exactly as printed, whether or not the source cell
+ * says "RMS": it is the DC per-phase current of the holding-torque test, which `formulas.ts`
+ * already turns into a sine-peak torque constant (Kt = T_hold / (√2 · I_rated)). Scaling it here as
+ * well would apply √2 twice.
+ */
+const toRatedCurrent = (_cell: string, value: number | undefined) => value;
 
 const readJsonFile = <T>(filePath: string, fallback: T): T => {
 	if (!fs.existsSync(filePath)) return fallback;
@@ -105,7 +105,7 @@ const parseVoron3DWikiFormat = (line: string): ParsedStepperData | null => {
 	const nemaSize = parseFloat(nema);
 	const bodyLengthNum = parseFloat(bodyLength);
 	const stepAngleNum = parseFloat(stepAngle);
-	const ratedCurrentNum = toPeakCurrent(ratedCurrent, parseFloat(ratedCurrent))!;
+	const ratedCurrentNum = toRatedCurrent(ratedCurrent, parseFloat(ratedCurrent))!;
 	// Just use N-mm as N-cm (their label is wrong)
 	const torqueNum = parseFloat(torque) ? parseFloat(torque) : undefined;
 	const inductanceNum = parseFloat(inductance);
@@ -226,7 +226,7 @@ async function convertCsvToTypeScript() {
 		const nemaSize = parseNumber(nema);
 		const bodyLengthNum = parseNumber(bodyLength);
 		const stepAngleNum = parseNumber(stepAngle);
-		const ratedCurrentNum = toPeakCurrent(ratedCurrent, parseNumber(ratedCurrent));
+		const ratedCurrentNum = toRatedCurrent(ratedCurrent, parseNumber(ratedCurrent));
 		const torqueNum = parseNumber(torque);
 		const inductanceNum = parseNumber(inductance);
 		const resistanceNum = parseNumber(resistance);
@@ -307,7 +307,7 @@ async function convertCsvToTypeScript() {
 		const nemaSize = parseNemaSize(body);
 		const bodyLengthNum = parseNumberWithUnit(length);
 		const stepAngleNum = parseNumberWithUnit(stepAngle);
-		const ratedCurrentNum = toPeakCurrent(maxAmperage, parseNumberWithUnit(maxAmperage));
+		const ratedCurrentNum = toRatedCurrent(maxAmperage, parseNumberWithUnit(maxAmperage));
 		const torqueNum = parseNumberWithUnit(holdingTorque);
 		const inductanceNum = parseNumberWithUnit(inductance);
 		const resistanceNum = parseNumberWithUnit(resistance);

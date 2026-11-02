@@ -16,7 +16,9 @@ import { BookIcon, IdCardIcon, Table2Icon, XIcon } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 const createMergedDB = (customSteppers: StepperDefinition[]) => {
-	const mergedDB = new Map(STEPPER_DB);
+	// Copy each brand's map too: a shallow copy would insert custom steppers into STEPPER_DB itself,
+	// where they would outlive their deletion and could replace a database entry of the same name
+	const mergedDB = new Map(Array.from(STEPPER_DB, ([brand, models]) => [brand, new Map(models)] as const));
 
 	// Pre-process custom steppers by brand to avoid multiple map operations
 	const customByBrand = customSteppers.reduce(
