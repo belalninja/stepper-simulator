@@ -8,6 +8,9 @@ import {
 	type GantrySettings,
 	KinematicsMode,
 	MotorModel,
+	DEFAULT_Z_AXIS_SETTINGS,
+	type ZAxisSettings,
+	ZAxisSettingsSchema,
 	type ShareableConfiguration
 } from '@/lib/configuration';
 import { CurrentUnit } from '@/lib/current-unit';
@@ -120,7 +123,9 @@ const SharedConfigSchema = z.object({
 		.optional(),
 	c: z.array(StepperTuple).optional(), // customSteppers
 	b: z.boolean().optional(), // debug
-	s: z.array(StepperRef).optional() // selectedSteppers
+	s: z.array(StepperRef).optional(), // selectedSteppers
+	// zAxisSettings: only the fields that differ from the defaults, by their full names
+	z: z.record(z.string(), z.unknown()).optional()
 });
 type SharedConfig = z.infer<typeof SharedConfigSchema>;
 
@@ -309,6 +314,20 @@ function base64UrlToBytes(value: string): Uint8Array {
  * Steppers that the receiving client can look up itself (stepper DB entries, and custom steppers
  * that travel along in the same link) are referenced by id instead of being written out in full.
  */
+function packZAxisSettings(settings: ZAxisSettings | undefined): SharedConfig['z'] {
+	if (!settings) return undefined;
+	const packed: Record<string, unknown> = {};
+	for (const key of Object.keys(DEFAULT_Z_AXIS_SETTINGS) as (keyof ZAxisSettings)[]) {
+		if (settings[key] !== DEFAULT_Z_AXIS_SETTINGS[key]) packed[key] = settings[key];
+	}
+	return Object.keys(packed).length > 0 ? packed : undefined;
+}
+
+/** Unknown or invalid fields fall back to their defaults (each field of the schema has a `.catch`) */
+function unpackZAxisSettings(packed: SharedConfig['z']): ZAxisSettings {
+	return ZAxisSettingsSchema.parse({ ...DEFAULT_Z_AXIS_SETTINGS, ...packed });
+}
+
 export function encodeConfig(config: ShareableConfiguration): string {
 	const payload: SharedConfig = { v: SHARE_FORMAT_VERSION };
 
@@ -319,6 +338,9 @@ export function encodeConfig(config: ShareableConfiguration): string {
 	if (gantry) payload.g = gantry;
 
 	if (config.debug !== DEFAULT_DEBUG) payload.b = config.debug;
+
+	const zAxis = packZAxisSettings(config.zAxisSettings);
+	if (zAxis) payload.z = zAxis;
 
 	// Only custom steppers that a selection actually points at travel with the link. The rest of
 	// the sender's library is dead weight to the recipient and not theirs to hand out
@@ -365,7 +387,8 @@ function decodeSharedConfig(payload: SharedConfig): ImportedConfiguration {
 			gantrySettings: unpackGantrySettings(payload.g),
 			customSteppers,
 			debug: payload.b ?? DEFAULT_DEBUG,
-			selectedSteppers
+			selectedSteppers,
+			zAxisSettings: unpackZAxisSettings(payload.z)
 		},
 		unresolvedSteppers
 	};

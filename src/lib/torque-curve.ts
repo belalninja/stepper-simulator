@@ -198,9 +198,34 @@ export function autoMaxVelocity({
 }: Omit<TorqueCurveInput, 'maxVelocity' | 'stepSize'> & { requiredTorque: number }): number {
 	if (input.steppers.length === 0) return DEFAULT_MAX_VELOCITY;
 
-	const stepSize = AUTO_MAX_VELOCITY_CAP / 500;
-	const points = buildTorqueCurve({ ...input, maxVelocity: AUTO_MAX_VELOCITY_CAP, stepSize });
-	const keys = input.steppers.map(stepperSeriesKey);
+	return fitVelocityRange({
+		keys: input.steppers.map(stepperSeriesKey),
+		requiredTorque,
+		cap: AUTO_MAX_VELOCITY_CAP,
+		fallback: DEFAULT_MAX_VELOCITY,
+		build: (maxVelocity, stepSize) => buildTorqueCurve({ ...input, maxVelocity, stepSize })
+	});
+}
+
+/**
+ * The range-fitting core of `autoMaxVelocity`, for any curve builder. `cap` bounds the search and
+ * the sampling is `cap / 500`, so an axis with lower speeds (Z) passes a smaller cap for resolution.
+ */
+export function fitVelocityRange({
+	keys,
+	requiredTorque,
+	cap,
+	fallback,
+	build
+}: {
+	keys: string[];
+	requiredTorque: number;
+	cap: number;
+	fallback: number;
+	build: (maxVelocity: number, stepSize: number) => TorqueCurvePoint[];
+}): number {
+	const stepSize = cap / 500;
+	const points = build(cap, stepSize);
 	const required = Number.isFinite(requiredTorque) ? Math.max(requiredTorque, 0) : 0;
 
 	const thresholds = new Map(
@@ -219,9 +244,9 @@ export function autoMaxVelocity({
 		}
 	}
 
-	if (lastRelevant === 0) return roundToNiceRange(DEFAULT_MAX_VELOCITY);
+	if (lastRelevant === 0) return roundToNiceRange(fallback);
 
-	return roundToNiceRange(Math.min(lastRelevant * AUTO_VELOCITY_HEADROOM, AUTO_MAX_VELOCITY_CAP));
+	return roundToNiceRange(Math.min(lastRelevant * AUTO_VELOCITY_HEADROOM, cap));
 }
 
 /**

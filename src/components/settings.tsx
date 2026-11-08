@@ -8,7 +8,8 @@ import { Switch } from '@/components/ui/switch';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { track } from '@/lib/analytics';
 import { fitTorqueDerating, stepperSeriesKey } from '@/lib/torque-curve';
-import type { CoreXYDirectionMode, KinematicsMode } from '@/lib/configuration';
+import type { CoreXYDirectionMode, KinematicsMode, ZAxisSettings } from '@/lib/configuration';
+import { calculateZCases, zIsSelfLocking, zLiftEfficiency, zTravelPerMotorRev } from '@/lib/z-axis';
 import { CURRENT_UNIT_LABEL, type CurrentUnit, formatCurrent, peakToUnit, unitToPeak } from '@/lib/current-unit';
 import {
 	calculateCoreXYPeakTorqueAngleRad,
@@ -18,7 +19,13 @@ import {
 	type MotorModel
 } from '@/lib/formulas';
 import type { Ampere, Degree, Grams, MillimetersPerSecondSquared, NewtonCentimeter, Volts } from '@/lib/stepper';
-import { currentDebugAtom, currentDriveSettingsAtom, currentGantrySettingsAtom, steppersAtom } from '@/state/atoms';
+import {
+	currentDebugAtom,
+	currentDriveSettingsAtom,
+	currentGantrySettingsAtom,
+	currentZAxisSettingsAtom,
+	steppersAtom
+} from '@/state/atoms';
 import { useAtom, useAtomValue } from 'jotai';
 import { useState } from 'react';
 import {
@@ -178,6 +185,7 @@ function Calibration() {
 	const [measured, setMeasured] = useState<number | null>(null);
 	const [message, setMessage] = useState<string | null>(null);
 
+	const zMode = useAtomValue(currentZAxisSettingsAtom).enabled;
 	const stepper = steppers.find((s) => stepperSeriesKey(s) === stepperKey) ?? steppers[0];
 	const factor = driveSettings.torqueDerating;
 
@@ -211,7 +219,12 @@ function Calibration() {
 				raise the speed until the motor skips, and enter that speed. On CoreXY, use the worst-case envelope so
 				every direction is covered.
 			</span>
-			{steppers.length === 0 ? (
+			{zMode ? (
+				<span className="text-xs text-muted-foreground">
+					Fitting uses an XY speed test, so switch Z mode off to fit. The factor below still applies to the Z
+					curves.
+				</span>
+			) : steppers.length === 0 ? (
 				<span className="text-xs text-muted-foreground">Select the motor you tested first.</span>
 			) : (
 				<>
@@ -602,6 +615,326 @@ export function GantrySettings() {
 					</>
 				)}
 			</CardContent>
+		</Card>
+	);
+}
+
+function ZField({
+	label,
+	unit,
+	value,
+	onChange,
+	step,
+	min = 0,
+	hint
+}: {
+	label: string;
+	unit: string;
+	value: number;
+	onChange: (value: number) => void;
+	step?: number;
+	min?: number;
+	hint?: string;
+}) {
+	return (
+		<label className="grid grid-cols-[minmax(0,1fr)_6.5rem_3.5rem] items-center gap-2 text-sm" title={hint}>
+			<span className="min-w-0">{label}</span>
+			<NumberInput
+				aria-label={label}
+				min={min}
+				step={step}
+				value={value}
+				onValueChange={(v) => {
+					if (typeof v === 'number' && Number.isFinite(v) && v >= min) onChange(v);
+				}}
+			/>
+			<span className="text-xs text-muted-foreground">{unit}</span>
+		</label>
+	);
+}
+
+/**
+ * Z-axis mode: lifting, lowering and holding against gravity through a leadscrew, ball screw or belt.
+ * While it is on, the graph shows Z curves; the XY settings and their calculations are untouched.
+ */
+export function ZAxisSettingsCard() {
+	const [z, setZ] = useAtom(currentZAxisSettingsAtom);
+	const [gantrySettings, setGantrySettings] = useAtom(currentGantrySettingsAtom);
+	const driveSettings = useAtomValue(currentDriveSettingsAtom);
+	const steppers = useAtomValue(steppersAtom);
+	const set = <K extends keyof ZAxisSettings>(key: K, value: ZAxisSettings[K]) => setZ({ ...z, [key]: value });
+
+	const travel = zTravelPerMotorRev(z);
+	const selfLocking = zIsSelfLocking(z);
+	const efficiency = zLiftEfficiency(z);
+	const fmt = (v: number) => (Number.isFinite(v) ? v.toFixed(2) : '∞');
+
+	return (
+		<Card className="w-full">
+			<CardHeader>
+				<div className="flex flex-wrap items-center justify-between gap-2">
+					<CardTitle>Z Axis</CardTitle>
+					<label className="flex items-center gap-2 text-sm">
+						<span>{z.enabled ? 'Simulating Z' : 'Simulate Z instead of XY'}</span>
+						<Switch checked={z.enabled} onCheckedChange={(checked) => set('enabled', checked)} />
+					</label>
+				</div>
+			</CardHeader>
+			{!z.enabled ? (
+				<CardContent>
+					<p className="text-xs text-muted-foreground">
+						Checks whether Z motors can lift, lower and hold the gantry or bed, and whether the axis stays
+						put with the motors off. Turning it on switches the graph to Z; your XY settings stay as they
+						are.
+					</p>
+				</CardContent>
+			) : (
+				<CardContent className="flex flex-col gap-3">
+					<ToggleGroup
+						type="single"
+						variant="outline"
+						size="sm"
+						className="w-full max-w-sm"
+						value={z.drive}
+						onValueChange={(value) => {
+							if (value === 'leadscrew' || value === 'ballscrew' || value === 'belt') set('drive', value);
+						}}
+					>
+						<ToggleGroupItem value="leadscrew" className="flex-1">
+							Leadscrew
+						</ToggleGroupItem>
+						<ToggleGroupItem value="ballscrew" className="flex-1">
+							Ball screw
+						</ToggleGroupItem>
+						<ToggleGroupItem value="belt" className="flex-1">
+							Belt
+						</ToggleGroupItem>
+					</ToggleGroup>
+
+					<div className="flex w-full max-w-sm flex-col gap-2">
+						<label className="flex items-center justify-between gap-2 text-sm">
+							<span>Z motors</span>
+							<ToggleGroup
+								type="single"
+								variant="outline"
+								size="sm"
+								value={String(z.motorCount)}
+								onValueChange={(value) => value && set('motorCount', Number(value))}
+							>
+								{[1, 2, 3, 4].map((n) => (
+									<ToggleGroupItem key={n} value={String(n)} className="w-9">
+										{n}
+									</ToggleGroupItem>
+								))}
+							</ToggleGroup>
+						</label>
+						<ZField
+							label="Lifted mass"
+							unit="g"
+							step={50}
+							value={z.liftedMass}
+							onChange={(v) => set('liftedMass', v as Grams)}
+							hint="Everything the Z motors carry: gantry, XY motors and rails, toolhead (or the bed)"
+						/>
+						<ZField
+							label="Z acceleration"
+							unit="mm/s²"
+							step={50}
+							min={1}
+							value={z.acceleration}
+							onChange={(v) => set('acceleration', v as MillimetersPerSecondSquared)}
+						/>
+						<ZField
+							label="Guide friction"
+							unit="N"
+							step={0.5}
+							value={z.guideFrictionN}
+							onChange={(v) => set('guideFrictionN', v)}
+						/>
+						<ZField
+							label="Gear ratio (motor turns per output turn)"
+							unit=":1"
+							step={0.5}
+							min={0.01}
+							value={z.gearRatio}
+							onChange={(v) => set('gearRatio', v)}
+							hint="80:16 belt reduction = 5. Direct drive = 1"
+						/>
+						{z.drive === 'belt' ? (
+							<>
+								<ZField
+									label="Output pulley teeth"
+									unit="T"
+									step={1}
+									min={1}
+									value={z.pulleyTeeth}
+									onChange={(v) => set('pulleyTeeth', v)}
+								/>
+								<ZField
+									label="Tooth pitch"
+									unit="mm"
+									step={1}
+									min={0.1}
+									value={z.toothPitch}
+									onChange={(v) => set('toothPitch', v)}
+								/>
+							</>
+						) : (
+							<>
+								<ZField
+									label="Screw diameter"
+									unit="mm"
+									step={1}
+									min={1}
+									value={z.screwDiameter}
+									onChange={(v) => set('screwDiameter', v)}
+								/>
+								<ZField
+									label="Thread pitch"
+									unit="mm"
+									step={0.5}
+									min={0.1}
+									value={z.screwPitch}
+									onChange={(v) => set('screwPitch', v)}
+								/>
+								<ZField
+									label="Lead (travel per turn)"
+									unit="mm"
+									step={1}
+									min={0.1}
+									value={z.screwLead}
+									onChange={(v) => set('screwLead', v)}
+									hint="Pitch × number of starts: T8x2 = 2, T8x8 = 8"
+								/>
+								<ZField
+									label="Screw length"
+									unit="mm"
+									step={10}
+									value={z.screwLength}
+									onChange={(v) => set('screwLength', v)}
+								/>
+								{z.drive === 'leadscrew' ? (
+									<ZField
+										label="Nut friction μ"
+										unit=""
+										step={0.01}
+										value={z.nutFriction}
+										onChange={(v) => set('nutFriction', v)}
+										hint="Brass nut on steel ~0.15–0.2, POM ~0.1–0.15, dry or worn higher"
+									/>
+								) : (
+									<ZField
+										label="Ball screw efficiency"
+										unit=""
+										step={0.01}
+										min={0.01}
+										value={z.ballScrewEfficiency}
+										onChange={(v) => set('ballScrewEfficiency', Math.min(v, 1))}
+									/>
+								)}
+							</>
+						)}
+						<ZField
+							label="Detent torque (share of holding)"
+							unit="×"
+							step={0.01}
+							value={z.detentFraction}
+							onChange={(v) => set('detentFraction', Math.min(v, 1))}
+							hint="Unpowered resistance of the motor. Rarely on datasheets; 0.03–0.08 is typical"
+						/>
+						<ZField
+							label="Safety factor"
+							unit="×"
+							step={0.1}
+							min={1}
+							value={gantrySettings.safetyFactor}
+							onChange={(v) => setGantrySettings({ ...gantrySettings, safetyFactor: Math.max(1, v) })}
+						/>
+					</div>
+
+					<div className="flex w-full max-w-sm flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+						<span>{fmt(travel)} mm per motor turn</span>
+						{z.drive !== 'belt' && <span>lift efficiency {Math.round(efficiency * 100)}%</span>}
+						<span>
+							{z.drive === 'leadscrew'
+								? selfLocking
+									? 'screw self-locks'
+									: 'screw back-drives'
+								: z.drive === 'ballscrew'
+									? 'ball screws always back-drive'
+									: 'belts always back-drive'}
+						</span>
+					</div>
+
+					{steppers.length === 0 ? (
+						<p className="text-xs text-muted-foreground">Select motors to see the Z checks for each.</p>
+					) : (
+						<div className="w-full max-w-sm overflow-x-auto">
+							<table className="w-full text-xs tabular-nums">
+								<thead className="text-muted-foreground">
+									<tr className="text-left">
+										<th className="py-1 pr-2 font-medium">Motor (each)</th>
+										<th className="py-1 pr-2 text-right font-medium">Lift</th>
+										<th className="py-1 pr-2 text-right font-medium">Lower</th>
+										<th className="py-1 pr-2 text-right font-medium">Hold</th>
+										<th className="py-1 text-right font-medium">Power off</th>
+									</tr>
+								</thead>
+								<tbody>
+									{steppers.map((stepper) => {
+										const c = calculateZCases(z, stepper, driveSettings);
+										const tone = (need: number) =>
+											need <= c.available / gantrySettings.safetyFactor
+												? 'text-green-600 dark:text-green-400'
+												: need <= c.available
+													? 'text-amber-600 dark:text-amber-400'
+													: 'text-red-600 dark:text-red-400';
+										return (
+											<tr key={`${stepper.brand}|${stepper.model}`} className="border-t">
+												<td className="py-1 pr-2">
+													<div
+														className="truncate"
+														title={`${stepper.brand} ${stepper.model}`}
+													>
+														{stepper.model}
+													</div>
+													<div className="text-muted-foreground">
+														has {fmt(c.available)} Ncm
+													</div>
+												</td>
+												<td className={`py-1 pr-2 text-right ${tone(c.lift)}`}>
+													{fmt(c.lift)}
+												</td>
+												<td className={`py-1 pr-2 text-right ${tone(c.lower)}`}>
+													{fmt(c.lower)}
+												</td>
+												<td className={`py-1 pr-2 text-right ${tone(c.holdPowered)}`}>
+													{fmt(c.holdPowered)}
+												</td>
+												<td
+													className={`py-1 text-right ${c.holdsUnpowered ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}
+													title={
+														c.selfLocking
+															? 'The screw holds the load by friction'
+															: `Load pushes ${fmt(c.backDrive)} Ncm against about ${fmt(c.detent)} Ncm of detent`
+													}
+												>
+													{c.selfLocking ? 'holds' : c.holdsUnpowered ? 'holds' : 'drops'}
+												</td>
+											</tr>
+										);
+									})}
+								</tbody>
+							</table>
+							<p className="mt-1 text-[11px] text-muted-foreground">
+								Torque each motor needs, in Ncm. Green: within the safety factor, amber: works but thin,
+								red: not enough. Lift and lower include accelerating the rotor and screw. Hold is 0 when
+								the screw self-locks.
+							</p>
+						</div>
+					)}
+				</CardContent>
+			)}
 		</Card>
 	);
 }

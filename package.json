@@ -9,6 +9,8 @@
 		"build": "vite build && tsx scripts/split-build.ts && tsc -b && nitro build",
 		"lint": "eslint .",
 		"preview": "node .output/server/index.mjs",
+		"typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.scripts.json --noEmit && tsc -p tsconfig.server.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+		"test": "pnpm typecheck && tsx scripts/verify-xy-snapshot.ts && tsx scripts/verify-corexy.ts && tsx scripts/verify-z-axis.ts && tsx scripts/verify-persistence.ts",
 		"deploy:pages": "bash scripts/deploy-pages.sh",
 		"data:update-stepper-db": "tsx data/csv-converter.ts",
 		"data:dump-stepper-db-table": "tsx data/generate-table.ts"

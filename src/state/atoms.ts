@@ -6,7 +6,10 @@ import {
 	DriveSettingsSchema,
 	type GantrySettings,
 	GantrySettingsSchema,
-	type ShareableConfiguration
+	type ShareableConfiguration,
+	DEFAULT_Z_AXIS_SETTINGS,
+	type ZAxisSettings,
+	ZAxisSettingsSchema
 } from '@/lib/configuration';
 import { StepperDefinition } from '@/lib/stepper';
 import { STEPPER_DB } from '@/lib/stepper-db';
@@ -98,6 +101,11 @@ const SavedCustomSteppers = z.array(z.unknown()).transform((items) =>
 		return result.success ? [result.data] : [];
 	})
 );
+const zAxisSettingsAtom = atomWithLocalStorage<ZAxisSettings>(
+	'zAxisSettings',
+	DEFAULT_Z_AXIS_SETTINGS,
+	ZAxisSettingsSchema
+);
 const rawCustomSteppersAtom = atomWithLocalStorage<StepperDefinition[]>(
 	'customSteppers',
 	[],
@@ -118,6 +126,22 @@ const tempDriveSettingsAtom = atom<DriveSettings | null>(null);
 const tempGantrySettingsAtom = atom<GantrySettings | null>(null);
 const tempCustomSteppersAtom = atom<StepperDefinition[] | null>(null);
 const tempDebugAtom = atom<boolean | null>(null);
+const tempZAxisSettingsAtom = atom<ZAxisSettings | null>(null);
+
+export const currentZAxisSettingsAtom = atom(
+	(get) => {
+		const temp = get(tempZAxisSettingsAtom);
+		return get(isImportedConfigAtom) && temp ? temp : get(zAxisSettingsAtom);
+	},
+	(get, set, update: SetStateAction<ZAxisSettings>) => {
+		const isImported = get(isImportedConfigAtom);
+		const temp = get(tempZAxisSettingsAtom);
+		const prev = isImported && temp ? temp : get(zAxisSettingsAtom);
+		const nextValue =
+			typeof update === 'function' ? (update as (prev: ZAxisSettings) => ZAxisSettings)(prev) : update;
+		set(isImported ? tempZAxisSettingsAtom : zAxisSettingsAtom, nextValue);
+	}
+);
 
 export const currentDriveSettingsAtom = atom(
 	(get) => {
@@ -240,7 +264,8 @@ export const getCurrentConfigurationAtom = atom<ShareableConfiguration>((get) =>
 	gantrySettings: get(currentGantrySettingsAtom),
 	customSteppers: get(currentCustomSteppersAtom),
 	debug: get(currentDebugAtom),
-	selectedSteppers: get(steppersAtom)
+	selectedSteppers: get(steppersAtom),
+	zAxisSettings: get(currentZAxisSettingsAtom)
 }));
 
 export const loadImportedConfigurationAtom = atom(null, (_get, set, config: ShareableConfiguration) => {
@@ -248,6 +273,7 @@ export const loadImportedConfigurationAtom = atom(null, (_get, set, config: Shar
 	set(tempGantrySettingsAtom, config.gantrySettings);
 	set(tempCustomSteppersAtom, config.customSteppers);
 	set(tempDebugAtom, config.debug);
+	set(tempZAxisSettingsAtom, config.zAxisSettings ?? DEFAULT_Z_AXIS_SETTINGS);
 	set(sessionSelectionAtom, config.selectedSteppers);
 
 	set(isImportedConfigAtom, true);
@@ -264,6 +290,9 @@ export const saveImportedConfigurationAtom = atom(null, (get, set) => {
 	if (gantrySettings) set(gantrySettingsAtom, gantrySettings);
 	if (customSteppers) set(customSteppersAtom, customSteppers);
 	if (debug !== null) set(debugAtom, debug);
+	const zAxisSettings = get(tempZAxisSettingsAtom);
+	if (zAxisSettings) set(zAxisSettingsAtom, zAxisSettings);
+	set(tempZAxisSettingsAtom, null);
 	set(savedSelectionAtom, get(steppersAtom).map(stepperId));
 
 	set(tempDriveSettingsAtom, null);

@@ -1,7 +1,7 @@
 import { AttributionCard } from '@/components/attribution';
 import { Graph } from '@/components/graph';
 import { ImportWarning } from '@/components/import-warning';
-import { DriveSettings, GantrySettings } from '@/components/settings';
+import { DriveSettings, GantrySettings, ZAxisSettingsCard } from '@/components/settings';
 import { ShareConfigButton } from '@/components/share-config';
 import { StepperSpecsCard } from '@/components/specs';
 import { StepperSelection } from '@/components/stepper-management';
@@ -9,12 +9,19 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { track } from '@/lib/analytics';
 import { clearUrlConfig, parseConfigFromUrl } from '@/lib/share-url';
 import type { StepperDefinition } from '@/lib/stepper';
-import { loadImportedConfigurationAtom, steppersAtom, unresolvedImportedSteppersAtom } from '@/state/atoms';
+import {
+	currentZAxisSettingsAtom,
+	loadImportedConfigurationAtom,
+	steppersAtom,
+	unresolvedImportedSteppersAtom
+} from '@/state/atoms';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { useEffect } from 'react';
 
 export function App() {
 	const steppers = useAtomValue(steppersAtom);
+	// XY gantry settings do not apply while the graph shows the Z axis
+	const zMode = useAtomValue(currentZAxisSettingsAtom).enabled;
 	const loadImportedConfig = useSetAtom(loadImportedConfigurationAtom);
 	const setUnresolvedSteppers = useSetAtom(unresolvedImportedSteppersAtom);
 
@@ -42,7 +49,8 @@ export function App() {
 			</div>
 			<div className="md:hidden flex flex-col gap-2 w-full max-md:order-3">
 				<DriveSettings />
-				<GantrySettings />
+				<ZAxisSettingsCard />
+				{!zMode && <GantrySettings />}
 			</div>
 
 			<div className="max-md:contents md:flex md:flex-col gap-2 w-full md:w-2/3">
@@ -70,7 +78,8 @@ export function App() {
 
 				<StepperSelection />
 				<DriveSettings />
-				<GantrySettings />
+				<ZAxisSettingsCard />
+				{!zMode && <GantrySettings />}
 
 				<AttributionCard className="max-md:hidden" />
 			</div>

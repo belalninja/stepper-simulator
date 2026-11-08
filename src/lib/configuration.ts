@@ -66,6 +66,8 @@ export type ShareableConfiguration = {
 	customSteppers: StepperDefinition[];
 	debug: boolean;
 	selectedSteppers: StepperDefinition[];
+	/** Optional so configurations from before the Z-axis mode stay valid */
+	zAxisSettings?: ZAxisSettings;
 };
 
 export const DEFAULT_DEBUG = false;
@@ -121,3 +123,85 @@ export const GantrySettingsSchema = z.object({
 	manualRequiredTorque: NewtonCentimeter.nullable().catch(DEFAULT_GANTRY_SETTINGS.manualRequiredTorque),
 	safetyFactor: z.number().min(1).catch(DEFAULT_GANTRY_SETTINGS.safetyFactor)
 }) satisfies z.ZodType<GantrySettings>;
+
+// ---------------------------------------------------------------------------------------------
+// Z-axis mode. Fully separate from the XY settings above: switching it on changes which curves are
+// drawn, never how the Cartesian or CoreXY curves are calculated.
+// ---------------------------------------------------------------------------------------------
+
+export const ZDriveType = z.enum(['leadscrew', 'ballscrew', 'belt']);
+export type ZDriveType = z.infer<typeof ZDriveType>;
+
+export type ZAxisSettings = {
+	/** Draw Z-axis curves instead of XY */
+	enabled: boolean;
+	drive: ZDriveType;
+	/** Number of Z motors sharing the load equally */
+	motorCount: number;
+	/** Everything the Z motors lift: gantry, XY motion, toolhead (or the bed, on a moving-bed printer) */
+	liftedMass: Grams;
+	acceleration: MillimetersPerSecondSquared;
+	/** Rail and guide friction opposing the motion, total for the axis */
+	guideFrictionN: number;
+	/** Motor turns per output turn: 80:16 belt reduction = 5, direct drive = 1 */
+	gearRatio: number;
+	// Screw drives
+	/** Nominal screw diameter, mm (T8 = 8) */
+	screwDiameter: number;
+	/** Thread pitch, mm (distance between threads) */
+	screwPitch: number;
+	/** Lead, mm of travel per screw turn (pitch × starts: T8x2 = 2, T8x8 = 8) */
+	screwLead: number;
+	/** Screw length, mm: adds the screw's own inertia */
+	screwLength: number;
+	/** Nut-on-screw friction coefficient for trapezoidal screws (brass ~0.15–0.2, POM ~0.1–0.15) */
+	nutFriction: number;
+	/** Ball screw efficiency, both directions */
+	ballScrewEfficiency: number;
+	// Belt drive
+	pulleyTeeth: number;
+	toothPitch: number;
+	/** Unpowered detent torque as a share of holding torque (datasheets rarely list it; 0.03–0.08 is typical) */
+	detentFraction: number;
+};
+
+export const DEFAULT_Z_AXIS_SETTINGS: ZAxisSettings = {
+	enabled: false,
+	// Voron 2.4-style flying gantry: four belt-driven Z motors, 80:16 reduction, 20T GT2
+	drive: 'belt',
+	motorCount: 4,
+	liftedMass: 3000 as Grams,
+	acceleration: 350 as MillimetersPerSecondSquared,
+	guideFrictionN: 0,
+	gearRatio: 5,
+	screwDiameter: 8,
+	screwPitch: 2,
+	screwLead: 8,
+	screwLength: 350,
+	nutFriction: 0.18,
+	ballScrewEfficiency: 0.9,
+	pulleyTeeth: 20,
+	toothPitch: 2,
+	detentFraction: 0.05
+};
+
+const zNum = (fallback: number, min = 0) => z.number().min(min).catch(fallback);
+
+export const ZAxisSettingsSchema = z.object({
+	enabled: z.boolean().catch(DEFAULT_Z_AXIS_SETTINGS.enabled),
+	drive: ZDriveType.catch(DEFAULT_Z_AXIS_SETTINGS.drive),
+	motorCount: z.number().int().min(1).max(8).catch(DEFAULT_Z_AXIS_SETTINGS.motorCount),
+	liftedMass: Grams.catch(DEFAULT_Z_AXIS_SETTINGS.liftedMass),
+	acceleration: MillimetersPerSecondSquared.catch(DEFAULT_Z_AXIS_SETTINGS.acceleration),
+	guideFrictionN: zNum(DEFAULT_Z_AXIS_SETTINGS.guideFrictionN),
+	gearRatio: zNum(DEFAULT_Z_AXIS_SETTINGS.gearRatio, 0.01),
+	screwDiameter: zNum(DEFAULT_Z_AXIS_SETTINGS.screwDiameter, 1),
+	screwPitch: zNum(DEFAULT_Z_AXIS_SETTINGS.screwPitch, 0.1),
+	screwLead: zNum(DEFAULT_Z_AXIS_SETTINGS.screwLead, 0.1),
+	screwLength: zNum(DEFAULT_Z_AXIS_SETTINGS.screwLength),
+	nutFriction: zNum(DEFAULT_Z_AXIS_SETTINGS.nutFriction),
+	ballScrewEfficiency: z.number().gt(0).max(1).catch(DEFAULT_Z_AXIS_SETTINGS.ballScrewEfficiency),
+	pulleyTeeth: zNum(DEFAULT_Z_AXIS_SETTINGS.pulleyTeeth, 1),
+	toothPitch: zNum(DEFAULT_Z_AXIS_SETTINGS.toothPitch, 0.1),
+	detentFraction: z.number().min(0).max(1).catch(DEFAULT_Z_AXIS_SETTINGS.detentFraction)
+}) satisfies z.ZodType<ZAxisSettings>;

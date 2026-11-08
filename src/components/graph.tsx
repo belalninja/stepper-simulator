@@ -17,10 +17,16 @@ import {
 	stepperSeriesColor
 } from '@/lib/torque-curve';
 import { usePanZoom } from '@/lib/use-pan-zoom';
-import { currentDriveSettingsAtom, currentGantrySettingsAtom, steppersAtom } from '@/state/atoms';
+import {
+	currentDriveSettingsAtom,
+	currentGantrySettingsAtom,
+	currentZAxisSettingsAtom,
+	steppersAtom
+} from '@/state/atoms';
+import { autoMaxZVelocity, buildZTorqueCurve, calculateZRequiredTorque, zTravelPerMotorRev } from '@/lib/z-axis';
 import { useAtomValue } from 'jotai';
 import { GrabIcon, SearchIcon } from 'lucide-react';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Area, CartesianGrid, ComposedChart, Line, ReferenceDot, ReferenceLine, XAxis, YAxis } from 'recharts';
 
 const Y_AXIS_HEADROOM = 1.05;
@@ -57,10 +63,15 @@ function VisibleSeriesTooltip({
 export function Graph() {
 	const driveSettings = useAtomValue(currentDriveSettingsAtom);
 	const gantrySettings = useAtomValue(currentGantrySettingsAtom);
+	// Z-axis mode swaps the data source; the XY path below calls exactly what it did before
+	const zAxisSettings = useAtomValue(currentZAxisSettingsAtom);
+	const zMode = zAxisSettings.enabled;
 	// `null` until the field is edited: the range follows the selection on its own, but a typed
 	// value is never overwritten by it
 	const [manualMaxVelocity, setManualMaxVelocity] = useState<number | null>(null);
 	const [unit, setUnit] = useState<'mm/s' | 'rpm'>('mm/s');
+	// XY and Z speeds differ by orders of magnitude, so a typed range does not carry across modes
+	useEffect(() => setManualMaxVelocity(null), [zMode]);
 
 	const steppers = useAtomValue(steppersAtom);
 	// Series hidden from the legend. Kept by key, so a hidden motor stays hidden while settings change
@@ -74,7 +85,7 @@ export function Graph() {
 		});
 	const pulleyCircumferenceMm = gantrySettings.pulleyTeeth * gantrySettings.toothPitch;
 	const gearRatio = calculateGearRatio(gantrySettings);
-	const isCoreXY = gantrySettings.kinematicsMode === 'corexy';
+	const isCoreXY = !zMode && gantrySettings.kinematicsMode === 'corexy';
 	const directionMode = gantrySettings.corexyDirectionMode;
 	// The RPM axis shows the speed of the faster motor (motor A). In the envelope every direction is
 	// checked, so the axis uses the fastest one (45°, √2× path speed). In peak-torque mode θ*
@@ -87,20 +98,35 @@ export function Graph() {
 					resolveCoreXYAngleRad(gantrySettings, steppers.length === 1 ? steppers[0] : null)
 				);
 	const showsMarginScale = isCoreXY && (directionMode === 'envelope' || directionMode === 'peakTorque');
-	const mmsToRpm = (mms: number) => (mms * 60 * gearRatio * speedFactor) / pulleyCircumferenceMm;
-	const rpmToMms = (rpm: number) => (rpm * pulleyCircumferenceMm) / (60 * gearRatio * speedFactor);
+	const zTravel = zTravelPerMotorRev(zAxisSettings); // mm per motor turn
+	const mmsToRpm = (mms: number) =>
+		zMode ? (mms * 60) / zTravel : (mms * 60 * gearRatio * speedFactor) / pulleyCircumferenceMm;
+	const rpmToMms = (rpm: number) =>
+		zMode ? (rpm * zTravel) / 60 : (rpm * pulleyCircumferenceMm) / (60 * gearRatio * speedFactor);
 
-	const requiredTorque = calculateRequiredTorque(gantrySettings);
+	const requiredTorque = zMode ? calculateZRequiredTorque(zAxisSettings) : calculateRequiredTorque(gantrySettings);
 	const fittedMaxVelocity = useMemo(
-		() => autoMaxVelocity({ steppers, driveSettings, gantrySettings, requiredTorque }),
-		[steppers, driveSettings, gantrySettings, requiredTorque]
+		() =>
+			zMode
+				? autoMaxZVelocity({ steppers, driveSettings, zAxisSettings, requiredTorque })
+				: autoMaxVelocity({ steppers, driveSettings, gantrySettings, requiredTorque }),
+		[zMode, steppers, driveSettings, gantrySettings, zAxisSettings, requiredTorque]
 	);
 	const maxVelocity = manualMaxVelocity ?? fittedMaxVelocity;
 	const displayedMax = unit === 'rpm' ? mmsToRpm(maxVelocity) : maxVelocity;
 
 	const chartData = useMemo(
-		() => buildTorqueCurve({ steppers, driveSettings, gantrySettings, maxVelocity }),
-		[steppers, driveSettings, gantrySettings, maxVelocity]
+		() =>
+			zMode
+				? buildZTorqueCurve({
+						steppers,
+						driveSettings,
+						zAxisSettings,
+						maxVelocity,
+						stepSize: maxVelocity / 250
+					})
+				: buildTorqueCurve({ steppers, driveSettings, gantrySettings, maxVelocity }),
+		[zMode, steppers, driveSettings, gantrySettings, zAxisSettings, maxVelocity]
 	);
 
 	const safetyFactor = Math.max(1, gantrySettings.safetyFactor ?? 1);
@@ -112,16 +138,25 @@ export function Graph() {
 		() =>
 			driveSettings.showModelBand && steppers.length > 0
 				? BAND_MODELS.map((model) =>
-						buildTorqueCurve({
-							steppers,
-							driveSettings,
-							gantrySettings,
-							maxVelocity,
-							motorModelOverride: model
-						})
+						zMode
+							? buildZTorqueCurve({
+									steppers,
+									driveSettings,
+									zAxisSettings,
+									maxVelocity,
+									stepSize: maxVelocity / 250,
+									motorModelOverride: model
+								})
+							: buildTorqueCurve({
+									steppers,
+									driveSettings,
+									gantrySettings,
+									maxVelocity,
+									motorModelOverride: model
+								})
 					)
 				: null,
-		[steppers, driveSettings, gantrySettings, maxVelocity]
+		[zMode, steppers, driveSettings, gantrySettings, zAxisSettings, maxVelocity]
 	);
 
 	const plotData = useMemo(() => {
@@ -188,7 +223,7 @@ export function Graph() {
 		<Card className="pt-0">
 			<CardHeader className="flex flex-wrap items-center gap-2 space-y-0 border-b py-5 sm:flex-row">
 				<div className="grid flex-1 gap-1">
-					<CardTitle>Torque Graph</CardTitle>
+					<CardTitle>{zMode ? 'Z Torque Graph (lifting)' : 'Torque Graph'}</CardTitle>
 				</div>
 				<div className="flex flex-wrap items-center gap-2">
 					{zoomed && (
@@ -452,6 +487,14 @@ export function Graph() {
 							{driveSettings.torqueDerating !== 1 &&
 								`Motor torque scaled by ${driveSettings.torqueDerating.toFixed(2)}× from your calibration.`}
 						</p>
+
+						{zMode && (
+							<p className="text-center text-xs text-muted-foreground">
+								Z axis: each curve is the torque one motor has left after accelerating its rotor and
+								screw. The red line is the torque to lift its share of the load at full acceleration.
+								RPM is motor shaft speed. Lowering and holding are checked in the Z Axis card.
+							</p>
+						)}
 
 						{isCoreXY && (
 							<p className="text-center text-xs text-muted-foreground">
